@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Print Spooler Simulator & Hardware Queue Engine</title>
+  <meta name="description"
+    content="Simulate real-world OS print spooler FIFO/Priority/SJF queues, buffer memory, and hardware printing." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- PDF.js CDN for PDF page counting and preview -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+</head>
+
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-main">
+        <div class="header-title-box">
+          <div class="spooler-logo-badge">🖨️ OS Spooler</div>
+          <h1>Print Spooler &amp; Queue Management System</h1>
+          <p>Simulate real-world OS print spooling, buffer queues, priority preemption, and SJF scheduling.</p>
+        </div>
+        <div class="header-controls">
+          <button id="sound-toggle-btn" class="btn btn-secondary btn-sm" onclick="toggleSound()"
+            title="Toggle simulated mechanical sound effects">
+            🔇 Sound: OFF
+          </button>
+          <div class="speed-control-box">
+            <span class="speed-label-text">Speed:</span>
+            <div class="speed-buttons">
+              <button class="btn-chip" onclick="handleSpeedChange(1); setActiveChip(this)">1x</button>
+              <button class="btn-chip active" onclick="handleSpeedChange(2); setActiveChip(this)">2x</button>
+              <button class="btn-chip" onclick="handleSpeedChange(5); setActiveChip(this)">5x</button>
+              <button class="btn-chip" onclick="handleSpeedChange(10); setActiveChip(this)">10x</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telemetry KPI Dashboard -->
+      <div class="telemetry-bar">
+        <div class="telemetry-card">
+          <span class="telemetry-icon">🖨️</span>
+          <div class="telemetry-data">
+            <span class="telemetry-val" id="stat-jobs">0</span>
+            <span class="telemetry-label">Completed Jobs</span>
+          </div>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-icon">📄</span>
+          <div class="telemetry-data">
+            <span class="telemetry-val" id="stat-pages">0</span>
+            <span class="telemetry-label">Pages Printed</span>
+          </div>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-icon">⏳</span>
+          <div class="telemetry-data">
+            <span class="telemetry-val" id="stat-queue-pages">0</span>
+            <span class="telemetry-label">Queued Pages</span>
+          </div>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-icon">💾</span>
+          <div class="telemetry-data">
+            <span class="telemetry-val" id="stat-spool-memory">0.00 MB</span>
+            <span class="telemetry-label">Spool Buffer Used</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Grid -->
+    <div class="main-grid">
+      <!-- LEFT COLUMN: Job Submission & Operating Mode -->
+      <div class="column-left">
+        <!-- 1. Submit Print Job -->
+        <section class="card submission-card">
+          <div class="card-header">
+            <h2><span class="section-num">1</span> Submit Print Job</h2>
+            <span class="card-badge">Spool Input</span>
+          </div>
+
+          <!-- Tab Toggle for Input Type -->
+          <div class="tabs">
+            <button id="tab-file-btn" class="tab-btn active" onclick="switchTab('file')">
+              <span class="tab-icon">📄</span> Local PDF File
+            </button>
+            <button id="tab-link-btn" class="tab-btn" onclick="switchTab('link')">
+              <span class="tab-icon">🔗</span> Document URL
+            </button>
+          </div>
+
+          <!-- File Upload Form -->
+          <form id="file-form" class="job-form">
+            <div class="form-group">
+              <label>Select PDF Document:</label>
+              <div id="file-drop-zone" class="file-drop-zone">
+                <input type="file" id="pdf-input" accept="application/pdf" class="file-input-hidden" />
+                <div class="drop-zone-content">
+                  <div class="drop-icon">📤</div>
+                  <div class="drop-text" id="file-drop-name">Click or drag &amp; drop a PDF file here</div>
+                  <span class="drop-hint">PDF.js will automatically detect exact page count</span>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="file-priority">Priority Level:</label>
+              <select id="file-priority" class="form-select">
+                <option value="Normal">Normal (Default FIFO)</option>
+                <option value="High">High Priority</option>
+                <option value="Urgent">Urgent (Express Line)</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">📥 Spool File to Queue</button>
+          </form>
+
+          <!-- URL Link Form -->
+          <form id="link-form" class="job-form hidden">
+            <div class="form-group">
+              <label for="link-url">Document Link URL:</label>
+              <input type="url" id="link-url" class="form-input" placeholder="https://example.com/quarterly-report.pdf"
+                required />
+            </div>
+            <div class="form-group">
+              <label for="link-title">Document Title:</label>
+              <input type="text" id="link-title" class="form-input" placeholder="e.g. Flight Boarding Pass" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="link-pages">Page Count:</label>
+                <input type="number" id="link-pages" class="form-input" min="1" max="500" value="1" required />
+              </div>
+              <div class="form-group flex-1">
+                <label for="link-priority">Priority Level:</label>
+                <select id="link-priority" class="form-select">
+                  <option value="Normal">Normal</option>
+                  <option value="High">High</option>
+                  <option value="Urgent">Urgent</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">🔗 Spool Link to Queue</button>
+          </form>
+
+          <!-- Quick Sample Presets -->
+          <div class="presets-container">
+            <span class="presets-title">⚡ Quick Presets (One-click Test):</span>
+            <div class="preset-chips">
+              <button class="chip-preset" onclick="addSampleJob('quick')">+ 1-Page Pass</button>
+              <button class="chip-preset" onclick="addSampleJob('report')">+ 12-Page Report</button>
+              <button class="chip-preset" onclick="addSampleJob('urgent')">+ 4-Page Urgent</button>
+              <button class="chip-preset chip-highlight" onclick="addBatchSampleJobs()">📦 Batch 3 Jobs</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Operating Mode & Strategy -->
+        <section class="card controls-card">
+          <div class="card-header">
+            <h2><span class="section-num">2</span> Operating Mode &amp; Strategy</h2>
+            <span class="card-badge">Scheduler</span>
+          </div>
+
+          <div class="form-group">
+            <label for="mode-select">Execution Mode:</label>
+            <select id="mode-select" class="form-select" onchange="handleModeChange(this.value)">
+              <option value="manual">Manual Execution (Step-by-step)</option>
+              <option value="auto">Auto-Print (Continuous Dequeue)</option>
+              <option value="batch">Batch Mode (Trigger on 3+ jobs)</option>
+            </select>
+            <span class="form-helper-text">
+              Auto continuously drains queue; Batch mode waits for 3 jobs before starting.
+            </span>
+          </div>
+
+          <div class="form-group">
+            <label for="algorithm-select">Queue Scheduling Algorithm:</label>
+            <select id="algorithm-select" class="form-select" onchange="handleAlgorithmChange(this.value)">
+              <option value="fifo">FIFO (First In, First Out)</option>
+              <option value="priority">Priority Scheduling (Urgent &gt; High &gt; Normal)</option>
+              <option value="sjf">Shortest Job First (SJF by Page Count)</option>
+            </select>
+            <span class="form-helper-text">
+              Re-orders queue in real-time according to chosen algorithm rules.
+            </span>
+          </div>
+
+          <div class="manual-controls">
+            <button id="process-next-btn" class="btn btn-success" onclick="processNextJob()">
+              ▶️ Process Next Job
+            </button>
+            <button class="btn btn-danger" onclick="clearQueue()">
+              🗑️ Clear Queue
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- RIGHT COLUMN: Hardware Monitor & Live Queue -->
+      <div class="column-right">
+        <!-- 3. Active Printer Hardware -->
+        <section class="card hardware-card">
+          <div class="card-header">
+            <h2><span class="section-num">3</span> Active Hardware Monitor</h2>
+            <div class="led-wrapper">
+              <span id="status-led" class="status-led led-idle"></span>
+              <span class="led-label">System Online</span>
+            </div>
+          </div>
+
+          <div id="printer-hardware" class="printer-box">
+            <!-- Animated Printer Visualizer -->
+            <div class="printer-hardware-chassis">
+              <div class="printer-top-tray">
+                <div class="paper-sheet paper-input-sheet"></div>
+              </div>
+              <div class="printer-main-body">
+                <div class="printer-feed-slot">
+                  <div class="paper-sheet paper-output-sheet">
+                    <div class="sheet-lines"></div>
+                  </div>
+                </div>
+                <div class="printer-buttons-panel">
+                  <span class="printer-mini-led"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Printer Telemetry & Status -->
+            <div class="printer-details">
+              <div class="printer-status-header">
+                <h3 id="printer-status">Status: IDLE</h3>
+                <span id="page-indicator" class="page-indicator">Printer Ready</span>
+              </div>
+              <p id="current-job-text" class="current-job-text">Current Job: None</p>
+
+              <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+              </div>
+              <div class="progress-footer">
+                <span id="progress-text" class="progress-text">0% Completed</span>
+              </div>
+
+              <!-- In-Flight Hardware Controls -->
+              <div class="in-flight-controls">
+                <button id="pause-btn" class="btn btn-sm btn-secondary" onclick="togglePauseJob()" disabled>
+                  ⏸️ Pause
+                </button>
+                <button id="cancel-active-btn" class="btn btn-sm btn-outline-danger" onclick="cancelActiveJob()"
+                  disabled>
+                  ⏹️ Abort Job
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Live Print Queue -->
+        <section class="card queue-card">
+          <div class="card-header">
+            <h2>
+              <span class="section-num">4</span> Live Print Queue
+              <span class="queue-counter-tag">(<span id="queue-count">0</span>)</span>
+            </h2>
+            <span class="algorithm-indicator" id="algo-badge">Sorted by: FIFO</span>
+          </div>
+
+          <div id="queue-list" class="queue-list">
+            <div class="empty-state">
+              <div class="empty-icon">📥</div>
+              <p>Queue is empty. Select a PDF, link, or click a quick sample preset!</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- BOTTOM SECTION: Spool Directory & Completed Archive -->
+    <section class="card archive-card">
+      <div class="archive-header-row">
+        <div>
+          <h2><span class="section-num">5</span> Spool Directory &amp; Completed Archive</h2>
+          <p class="archive-subtitle">Permanent audit log of processed print jobs stored in simulated spool disk
+            directory.</p>
+        </div>
+        <div class="archive-actions">
+          <div class="search-box">
+            <input type="text" id="archive-search" class="form-input form-input-sm"
+              placeholder="🔍 Search archive by name or ID..." oninput="handleArchiveSearch(this.value)" />
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="exportArchiveCSV()" title="Export log to CSV file">
+            📥 Export CSV
+          </button>
+          <button class="btn btn-outline-danger btn-sm" onclick="clearArchive()" title="Clear spool archive">
+            🗑️ Clear Log
+          </button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="archive-table">
+          <thead>
+            <tr>
+              <th style="width: 110px;">Job ID</th>
+              <th>Document Name</th>
+              <th style="width: 100px;">Source</th>
+              <th style="width: 110px;">Pages</th>
+              <th style="width: 130px;">Completed At</th>
+              <th style="width: 120px; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="archive-body">
+            <tr>
+              <td colspan="6" class="text-center empty-state">No completed jobs stored in spool directory yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Print Spooler Engine Simulator • Built with HTML5, CSS3 &amp; Vanilla JavaScript</p>
+    </footer>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script>
+    function setActiveChip(btn) {
+      document.querySelectorAll('.speed-buttons .btn-chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
+    // Keep algorithm badge in sync
+    const originalAlgoChange = window.handleAlgorithmChange;
+    document.addEventListener("DOMContentLoaded", () => {
+      const select = document.getElementById("algorithm-select");
+      if (select) {
+        select.addEventListener("change", (e) => {
+          const badge = document.getElementById("algo-badge");
+          if (badge) {
+            const labels = { fifo: "Sorted by: FIFO", priority: "Sorted by: Priority", sjf: "Sorted by: SJF" };
+            badge.innerText = labels[e.target.value] || "Sorted by: " + e.target.value.toUpperCase();
+          }
+        });
+      }
+    });
+  </script>
+  <script src="script.js"></script>
+</body>
+
+</html>
